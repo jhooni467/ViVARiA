@@ -189,7 +189,7 @@ func _draw_flowers() -> void:
 		Vector2(1730, 860), Vector2(-1660, 980)
 	]
 
-	for i in flower_positions.size():
+	for i in range(flower_positions.size()):
 		var p: Vector2 = flower_positions[i]
 		var petal_color := Color("#f2a1a0") if i % 3 == 0 else Color("#f3d477")
 		draw_line(p, p + Vector2(0, -22), Color("#659a62"), 4.0, true)
