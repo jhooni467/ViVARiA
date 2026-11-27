@@ -10,16 +10,18 @@
 export.cfg
 export_credentials.cfg
 *.tmp
-
-# Imported translations (automatically generated from CSV files)
-*.translation
-
-# Mono-specific ignores
 .mono/
 data_*/
 mono_crash.*.json
 
+# Local build and signing files
+build/
+keystore/
+*.keystore
+*.jks
+
 # Export outputs
 *.exe
-# Uncomment if your project does not version PCK files as runtime dependencies.
-# *.pck
+*.apk
+*.aab
+*.pck
