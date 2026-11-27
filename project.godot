@@ -27,7 +27,3 @@ renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 environment/defaults/default_clear_color=Color(0.86, 0.93, 0.78, 1)
 textures/default_filters/use_nearest_mipmap_filter=false
-
-[application]
-
-; Intentionally no external permissions in the first prototype.
