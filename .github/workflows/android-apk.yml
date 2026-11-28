@@ -76,9 +76,20 @@ jobs:
           EOF
 
       - name: Validate project and scripts
+        shell: bash
         run: |
-          godot --headless --editor --path . --quit
-          godot --headless --path . --quit-after 2
+          set -o pipefail
+          godot --headless --editor --path . --quit 2>&1 | tee /tmp/vivaria-editor-check.log
+          if grep -Eiq 'SCRIPT ERROR:|Parse Error:|ERROR: Failed to load script' /tmp/vivaria-editor-check.log; then
+            echo "::error::Godot reported script or parse errors during editor validation."
+            exit 1
+          fi
+
+          godot --headless --path . --quit-after 2 2>&1 | tee /tmp/vivaria-runtime-check.log
+          if grep -Eiq 'SCRIPT ERROR:|Parse Error:|ERROR: Failed to load script' /tmp/vivaria-runtime-check.log; then
+            echo "::error::Godot reported script or parse errors during runtime validation."
+            exit 1
+          fi
 
       - name: Export debug APK
         run: |
