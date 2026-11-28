@@ -365,7 +365,7 @@ func _show_game() -> void:
 	how_stack.add_theme_constant_override("separation",3)
 	_margin(how,13,9,13,9).add_child(how_stack)
 	_label(how_stack,"CÓMO JUGAR",9,DARK_GREEN)
-	var how_text := ["Toca una semilla y luego otra para cambiar sus posiciones.","Toca dos tarjetas. Si son iguales, se quedarán descubiertas.","Toca las piezas curvas para girarlas y unir el recorrido.","Elige una hoja y después la maceta que tenga su color.","Toca los espacios vacíos para dibujar el reflejo."][_level-1]
+	var how_text: String = ["Toca una semilla y luego otra para cambiar sus posiciones.","Toca dos tarjetas. Si son iguales, se quedarán descubiertas.","Toca las piezas curvas para girarlas y unir el recorrido.","Elige una hoja y después la maceta que tenga su color.","Toca los espacios vacíos para dibujar el reflejo."][_level-1]
 	var how_label := _label(how_stack,how_text,12,MUTED)
 	how_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 
