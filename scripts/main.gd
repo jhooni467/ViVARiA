@@ -1,616 +1,763 @@
 extends Node2D
 
-const WORLD_RECT := Rect2(Vector2(-2100.0, -1300.0), Vector2(4200.0, 2600.0))
-const MIN_ZOOM := 0.38
-const MAX_ZOOM := 2.4
-const INITIAL_ZOOM := 0.78
-const MAX_WORLD_OBJECTS := 2500
-
-const TREE_COLORS := [
-	Color("#6b9f68"),
-	Color("#82b76f"),
-	Color("#4e8d68"),
-	Color("#a5c875"),
-	Color("#78ad83")
+const TITLES := ["Semillas en orden", "Parejas del bosque", "Un camino de agua", "El rincón de las hojas", "Un jardín en equilibrio"]
+const DESCRIPTIONS := [
+	"Coloca las cuatro semillas de la más pequeña a la más grande.",
+	"Encuentra las tres parejas de símbolos escondidos.",
+	"Gira las tuberías para llevar el agua hasta la flor.",
+	"Cada hoja quiere volver a su maceta del mismo color.",
+	"Completa el lado derecho para reflejar el pequeño jardín."
 ]
+const HINTS := [
+	"Selecciona una semilla y luego otra para intercambiar sus lugares.",
+	"Recuerda los símbolos que vas descubriendo. Hay tres parejas.",
+	"El agua sale por la izquierda, baja, cruza y vuelve a subir.",
+	"Selecciona una hoja y después toca la maceta de su color.",
+	"El lado derecho debe ser el reflejo exacto del lado izquierdo."
+]
+const ACCENTS := [Color("#b6c98b"), Color("#d9b9a2"), Color("#8ac9c2"), Color("#e5c77c"), Color("#b9a9d4")]
+const PANEL := Color("#faf9f0")
+const INK := Color("#3e5743")
+const MUTED := Color("#829078")
+const GREEN := Color("#789d70")
+const DARK_GREEN := Color("#527a5a")
 
-var _camera: Camera2D
-var _ui_layer: CanvasLayer
-var _tool_buttons: Dictionary = {}
-var _brush_size_label: Label
-var _tool_button_group: ButtonGroup
+var _layer: CanvasLayer
+var _root: Control
+var _screen := "home"
+var _level := 1
+var _completed: Array[int] = []
+var _status: Label
+var _board: Control
 
-var _active_tool := "terrain"
-var _brush_size := 112.0
-var _mouse_paint_active := false
-var _mouse_pan_active := false
-var _touch_positions: Dictionary = {}
-var _previous_pinch_distance := 0.0
-var _last_brush_position := Vector2(INF, INF)
-
-var _terrain_patches: Array[Dictionary] = []
-var _water_patches: Array[Dictionary] = []
-var _plants: Array[Dictionary] = []
+var _seeds: Array[int] = [3, 1, 4, 2]
+var _selected_seed := -1
+var _memory_faces: Array[String] = ["✿", "❧", "◈", "◈", "✿", "❧"]
+var _memory_open: Array[int] = []
+var _memory_pairs: Array[int] = []
+var _pipes: Array[int] = [0, 1, 3, 1, 2]
+var _leaf_items: Array[int] = [2, 0, 1]
+var _leaf_pots: Array[int] = [-1, -1, -1]
+var _selected_leaf := -1
+var _mirror_fixed: Array[int] = [0, 5, 8, 13]
+var _mirror_targets: Array[int] = [3, 6, 11, 14]
+var _mirror_filled: Array[int] = []
 
 
 func _ready() -> void:
-	_camera = Camera2D.new()
-	_camera.name = "WorldCamera"
-	_camera.position = Vector2.ZERO
-	_camera.zoom = Vector2.ONE * INITIAL_ZOOM
-	add_child(_camera)
-	_camera.make_current()
-	_clamp_camera()
-	_build_interface()
+	randomize()
+	_load_progress()
+	_layer = CanvasLayer.new()
+	_layer.name = "Interface"
+	add_child(_layer)
+	_show_home()
 	queue_redraw()
-
-
-func _build_interface() -> void:
-	_ui_layer = CanvasLayer.new()
-	_ui_layer.name = "EditorInterface"
-	add_child(_ui_layer)
-
-	var root := Control.new()
-	root.name = "InterfaceRoot"
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_PASS
-	_ui_layer.add_child(root)
-
-	_build_header(root)
-	_build_toolbar(root)
-
-
-func _build_header(root: Control) -> void:
-	var header := _make_panel(root, Vector2(276.0, 78.0))
-	header.position = Vector2(22.0, 20.0)
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 18)
-	margin.add_theme_constant_override("margin_right", 18)
-	margin.add_theme_constant_override("margin_top", 9)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	header.add_child(margin)
-
-	var stack := VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 1)
-	margin.add_child(stack)
-
-	var title := Label.new()
-	title.text = "ViVARiA"
-	title.add_theme_color_override("font_color", Color("#344d3b"))
-	title.add_theme_font_size_override("font_size", 25)
-	title.add_theme_font_override("font", ThemeDB.fallback_font)
-	stack.add_child(title)
-
-	var subtitle := Label.new()
-	subtitle.text = "CREA · EXPLORA · EXPERIMENTA"
-	subtitle.add_theme_color_override("font_color", Color("#71836b"))
-	subtitle.add_theme_font_size_override("font_size", 10)
-	stack.add_child(subtitle)
-
-	var status := _make_panel(root, Vector2(190.0, 62.0))
-	status.anchor_left = 1.0
-	status.anchor_right = 1.0
-	status.offset_left = -212.0
-	status.offset_right = -22.0
-	status.offset_top = 20.0
-	status.offset_bottom = 82.0
-
-	var status_margin := MarginContainer.new()
-	status_margin.add_theme_constant_override("margin_left", 15)
-	status_margin.add_theme_constant_override("margin_right", 15)
-	status_margin.add_theme_constant_override("margin_top", 7)
-	status_margin.add_theme_constant_override("margin_bottom", 7)
-	status.add_child(status_margin)
-
-	var status_stack := VBoxContainer.new()
-	status_stack.add_theme_constant_override("separation", 1)
-	status_margin.add_child(status_stack)
-
-	var world_label := Label.new()
-	world_label.text = "MUNDO 01"
-	world_label.add_theme_color_override("font_color", Color("#425b43"))
-	world_label.add_theme_font_size_override("font_size", 14)
-	world_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_stack.add_child(world_label)
-
-	var world_hint := Label.new()
-	world_hint.text = "DOS DEDOS · MOVER Y ZOOM"
-	world_hint.add_theme_color_override("font_color", Color("#788b72"))
-	world_hint.add_theme_font_size_override("font_size", 9)
-	world_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	status_stack.add_child(world_hint)
-
-
-func _build_toolbar(root: Control) -> void:
-	var toolbar := _make_panel(root, Vector2(822.0, 104.0))
-	toolbar.anchor_left = 0.5
-	toolbar.anchor_right = 0.5
-	toolbar.anchor_top = 1.0
-	toolbar.anchor_bottom = 1.0
-	toolbar.offset_left = -411.0
-	toolbar.offset_right = 411.0
-	toolbar.offset_top = -124.0
-	toolbar.offset_bottom = -20.0
-
-	var margin := MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 14)
-	margin.add_theme_constant_override("margin_right", 14)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	toolbar.add_child(margin)
-
-	var row := HBoxContainer.new()
-	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	row.add_theme_constant_override("separation", 9)
-	margin.add_child(row)
-
-	_tool_button_group = ButtonGroup.new()
-	var tool_definitions := [
-		{"id": "terrain", "label": "TIERRA"},
-		{"id": "water", "label": "AGUA"},
-		{"id": "plants", "label": "PLANTAS"},
-		{"id": "eraser", "label": "BORRAR"}
-	]
-
-	for definition in tool_definitions:
-		var tool_id: String = definition["id"]
-		var button := Button.new()
-		button.text = definition["label"]
-		button.custom_minimum_size = Vector2(126.0, 62.0)
-		button.toggle_mode = true
-		button.button_group = _tool_button_group
-		button.focus_mode = Control.FOCUS_NONE
-		button.add_theme_font_size_override("font_size", 13)
-		button.pressed.connect(_on_tool_selected.bind(tool_id))
-		row.add_child(button)
-		_tool_buttons[tool_id] = button
-		_style_tool_button(button, tool_id == _active_tool)
-
-	var separator := VSeparator.new()
-	separator.custom_minimum_size = Vector2(1.0, 42.0)
-	row.add_child(separator)
-
-	var brush_caption := Label.new()
-	brush_caption.text = "TAMAÑO"
-	brush_caption.add_theme_color_override("font_color", Color("#71836b"))
-	brush_caption.add_theme_font_size_override("font_size", 10)
-	brush_caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	row.add_child(brush_caption)
-
-	var smaller_button := _make_small_button("−")
-	smaller_button.pressed.connect(_change_brush_size.bind(-1))
-	row.add_child(smaller_button)
-
-	_brush_size_label = Label.new()
-	_brush_size_label.custom_minimum_size = Vector2(38.0, 0.0)
-	_brush_size_label.text = str(roundi(_brush_size))
-	_brush_size_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_brush_size_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	_brush_size_label.add_theme_color_override("font_color", Color("#425b43"))
-	_brush_size_label.add_theme_font_size_override("font_size", 14)
-	row.add_child(_brush_size_label)
-
-	var larger_button := _make_small_button("+")
-	larger_button.pressed.connect(_change_brush_size.bind(1))
-	row.add_child(larger_button)
-
-	_tool_buttons[_active_tool].button_pressed = true
-
-
-func _make_panel(parent: Control, minimum_size: Vector2) -> PanelContainer:
-	var panel := PanelContainer.new()
-	panel.custom_minimum_size = minimum_size
-	panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	var style := StyleBoxFlat.new()
-	style.bg_color = Color("#f7f5e9")
-	style.border_color = Color("#ffffff")
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(22)
-	style.shadow_color = Color(0.12, 0.20, 0.12, 0.16)
-	style.shadow_size = 10
-	style.shadow_offset = Vector2(0.0, 4.0)
-	panel.add_theme_stylebox_override("panel", style)
-	parent.add_child(panel)
-	return panel
-
-
-func _make_small_button(text_value: String) -> Button:
-	var button := Button.new()
-	button.text = text_value
-	button.custom_minimum_size = Vector2(42.0, 46.0)
-	button.focus_mode = Control.FOCUS_NONE
-	button.add_theme_font_size_override("font_size", 20)
-	var normal := StyleBoxFlat.new()
-	normal.bg_color = Color("#e9edda")
-	normal.set_corner_radius_all(14)
-	button.add_theme_stylebox_override("normal", normal)
-	var hover := StyleBoxFlat.new()
-	hover.bg_color = Color("#dce8cd")
-	hover.set_corner_radius_all(14)
-	button.add_theme_stylebox_override("hover", hover)
-	button.add_theme_stylebox_override("pressed", hover)
-	button.add_theme_color_override("font_color", Color("#405b43"))
-	return button
-
-
-func _style_tool_button(button: Button, selected: bool) -> void:
-	var normal := StyleBoxFlat.new()
-	normal.bg_color = Color("#e8edda") if selected else Color("#f0f0e4")
-	normal.border_color = Color("#b5c99c") if selected else Color("#e4e7d8")
-	normal.set_border_width_all(1)
-	normal.set_corner_radius_all(16)
-	button.add_theme_stylebox_override("normal", normal)
-
-	var hover := StyleBoxFlat.new()
-	hover.bg_color = Color("#dfe9d0")
-	hover.set_corner_radius_all(16)
-	button.add_theme_stylebox_override("hover", hover)
-
-	var pressed := StyleBoxFlat.new()
-	pressed.bg_color = Color("#d5e5c7")
-	pressed.set_border_width_all(1)
-	pressed.set_border_color(Color("#9dbb88"))
-	pressed.set_corner_radius_all(16)
-	button.add_theme_stylebox_override("pressed", pressed)
-
-	button.add_theme_color_override("font_color", Color("#405b43") if selected else Color("#687b61"))
-	button.add_theme_color_override("font_hover_color", Color("#354e39"))
-	button.add_theme_color_override("font_pressed_color", Color("#354e39"))
-
-
-func _on_tool_selected(tool_id: String) -> void:
-	_active_tool = tool_id
-	for key in _tool_buttons:
-		var button: Button = _tool_buttons[key]
-		_style_tool_button(button, key == _active_tool)
-		button.button_pressed = key == _active_tool
-
-
-func _change_brush_size(direction: int) -> void:
-	_brush_size = clampf(_brush_size + float(direction) * 28.0, 52.0, 220.0)
-	if is_instance_valid(_brush_size_label):
-		_brush_size_label.text = str(roundi(_brush_size))
-
-
-func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			_mouse_paint_active = event.pressed
-			if event.pressed:
-				_last_brush_position = Vector2(INF, INF)
-				_apply_brush(_screen_to_world(event.position), true)
-		elif event.button_index == MOUSE_BUTTON_MIDDLE or event.button_index == MOUSE_BUTTON_RIGHT:
-			_mouse_pan_active = event.pressed
-		elif event.button_index == MOUSE_BUTTON_WHEEL_UP and event.pressed:
-			_set_zoom(_camera.zoom.x * 1.12)
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN and event.pressed:
-			_set_zoom(_camera.zoom.x / 1.12)
-
-	elif event is InputEventMouseMotion:
-		if _mouse_pan_active:
-			_camera.position -= event.relative / _camera.zoom.x
-			_clamp_camera()
-		elif _mouse_paint_active:
-			_apply_brush(_screen_to_world(event.position))
-
-	elif event is InputEventScreenTouch:
-		if event.pressed:
-			_touch_positions[event.index] = event.position
-			if _touch_positions.size() == 1:
-				_last_brush_position = Vector2(INF, INF)
-				_apply_brush(_screen_to_world(event.position), true)
-			elif _touch_positions.size() >= 2:
-				_previous_pinch_distance = _get_pinch_distance()
-		else:
-			_touch_positions.erase(event.index)
-			if _touch_positions.size() < 2:
-				_previous_pinch_distance = 0.0
-			if _touch_positions.size() == 1:
-				_last_brush_position = Vector2(INF, INF)
-
-	elif event is InputEventScreenDrag:
-		var previous_center := _get_touch_center()
-		_touch_positions[event.index] = event.position
-		if _touch_positions.size() == 1:
-			_apply_brush(_screen_to_world(event.position))
-		elif _touch_positions.size() >= 2:
-			var current_center := _get_touch_center()
-			var current_distance := _get_pinch_distance()
-			_camera.position -= (current_center - previous_center) / _camera.zoom.x
-			if _previous_pinch_distance > 0.0 and current_distance > 0.0:
-				_set_zoom(_camera.zoom.x * (current_distance / _previous_pinch_distance))
-			_previous_pinch_distance = current_distance
-			_clamp_camera()
-
-
-func _screen_to_world(screen_position: Vector2) -> Vector2:
-	return get_viewport().get_canvas_transform().affine_inverse() * screen_position
-
-
-func _apply_brush(world_position: Vector2, force: bool = false) -> void:
-	if not WORLD_RECT.has_point(world_position):
-		return
-
-	var spacing := maxf(18.0, _brush_size * 0.30)
-	if not force and _last_brush_position.distance_to(world_position) < spacing:
-		return
-
-	match _active_tool:
-		"terrain":
-			if _terrain_patches.size() < MAX_WORLD_OBJECTS:
-				_terrain_patches.append({
-					"position": world_position,
-					"radius": _brush_size * randf_range(0.88, 1.12),
-					"seed": randi()
-				})
-		"water":
-			if _water_patches.size() < MAX_WORLD_OBJECTS:
-				_water_patches.append({
-					"position": world_position,
-					"radius": _brush_size * randf_range(0.82, 1.10),
-					"seed": randi()
-				})
-		"plants":
-			if force or _last_brush_position.distance_to(world_position) >= _brush_size * 0.75:
-				if _plants.size() < MAX_WORLD_OBJECTS:
-					_plants.append({
-						"position": world_position,
-						"kind": randi_range(0, 2),
-						"scale": randf_range(0.82, 1.20),
-						"seed": randi()
-					})
-		"eraser":
-			_erase_at(world_position)
-
-	_last_brush_position = world_position
-	queue_redraw()
-
-
-func _erase_at(world_position: Vector2) -> void:
-	for i in range(_terrain_patches.size() - 1, -1, -1):
-		var patch: Dictionary = _terrain_patches[i]
-		var radius: float = float(patch["radius"])
-		var patch_position: Vector2 = patch["position"]
-		if patch_position.distance_to(world_position) <= _brush_size + radius * 0.65:
-			_terrain_patches.remove_at(i)
-
-	for i in range(_water_patches.size() - 1, -1, -1):
-		var patch: Dictionary = _water_patches[i]
-		var radius: float = float(patch["radius"])
-		var patch_position: Vector2 = patch["position"]
-		if patch_position.distance_to(world_position) <= _brush_size + radius * 0.65:
-			_water_patches.remove_at(i)
-
-	for i in range(_plants.size() - 1, -1, -1):
-		var plant: Dictionary = _plants[i]
-		var plant_position: Vector2 = plant["position"]
-		if plant_position.distance_to(world_position) <= _brush_size + 42.0:
-			_plants.remove_at(i)
-
-
-func _get_touch_center() -> Vector2:
-	var points: Array = _touch_positions.values()
-	if points.is_empty():
-		return Vector2.ZERO
-	var total := Vector2.ZERO
-	for point in points:
-		total += point
-	return total / float(points.size())
-
-
-func _get_pinch_distance() -> float:
-	var points: Array = _touch_positions.values()
-	if points.size() < 2:
-		return 0.0
-	return points[0].distance_to(points[1])
-
-
-func _set_zoom(value: float) -> void:
-	var zoom_value := clampf(value, MIN_ZOOM, MAX_ZOOM)
-	_camera.zoom = Vector2.ONE * zoom_value
-	_clamp_camera()
-
-
-func _clamp_camera() -> void:
-	var half_view := get_viewport_rect().size / (2.0 * _camera.zoom.x)
-	var min_x := WORLD_RECT.position.x + minf(half_view.x, WORLD_RECT.size.x * 0.5)
-	var max_x := WORLD_RECT.end.x - minf(half_view.x, WORLD_RECT.size.x * 0.5)
-	var min_y := WORLD_RECT.position.y + minf(half_view.y, WORLD_RECT.size.y * 0.5)
-	var max_y := WORLD_RECT.end.y - minf(half_view.y, WORLD_RECT.size.y * 0.5)
-	_camera.position.x = clampf(_camera.position.x, min_x, max_x)
-	_camera.position.y = clampf(_camera.position.y, min_y, max_y)
 
 
 func _draw() -> void:
-	draw_rect(WORLD_RECT, Color("#dcebc2"), true)
-
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-2100, -470), Vector2(-1780, -980), Vector2(-1260, -1080),
-		Vector2(-760, -820), Vector2(-220, -1050), Vector2(360, -760),
-		Vector2(900, -990), Vector2(1500, -760), Vector2(2100, -940),
-		Vector2(2100, 1300), Vector2(-2100, 1300)
-	]), Color("#c4dca0"))
-
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-2100, 40), Vector2(-1660, -360), Vector2(-1160, -300),
-		Vector2(-660, -80), Vector2(-110, -340), Vector2(420, -80),
-		Vector2(980, -330), Vector2(1500, -90), Vector2(2100, -260),
-		Vector2(2100, 1300), Vector2(-2100, 1300)
-	]), Color("#a9cf8b"))
-
-	_draw_pond()
-	_draw_meadow_paths()
-	_draw_tree_groups()
-	_draw_flowers()
-	_draw_foreground_bushes()
-	_draw_terrain_patches()
-	_draw_water_patches()
-	_draw_placed_plants()
+	var s := get_viewport_rect().size
+	draw_rect(Rect2(Vector2.ZERO, s), Color("#eaf0d8"), true)
+	draw_colored_polygon(PackedVector2Array([Vector2(0,0), Vector2(210,0), Vector2(440,125), Vector2(700,0), Vector2(1010,110), Vector2(s.x,0), Vector2(s.x,s.y), Vector2(0,s.y)]), Color("#e3edce"))
+	draw_colored_polygon(PackedVector2Array([Vector2(0,280), Vector2(190,205), Vector2(390,300), Vector2(590,205), Vector2(820,310), Vector2(1030,220), Vector2(s.x,300), Vector2(s.x,s.y), Vector2(0,s.y)]), Color("#d1e4b5"))
+	draw_colored_polygon(PackedVector2Array([Vector2(0,460), Vector2(230,390), Vector2(460,470), Vector2(710,370), Vector2(930,470), Vector2(1140,390), Vector2(s.x,470), Vector2(s.x,s.y), Vector2(0,s.y)]), Color("#c1dba1"))
+	_tree(Vector2(78,110), 0.72, Color("#75a779"))
+	_tree(Vector2(s.x-95,134), 0.82, Color("#80ad77"))
+	_tree(Vector2(205,s.y-36), 0.60, Color("#8ab37a"))
+	_tree(Vector2(s.x-230,s.y-24), 0.62, Color("#8caf7b"))
+	_flower(Vector2(330,110))
+	_flower(Vector2(s.x-390,s.y-86))
 
 
-func _draw_pond() -> void:
-	var pond_center := Vector2(410, 410)
-	draw_circle(pond_center, 360.0, Color("#79c6bd"))
-	draw_circle(pond_center + Vector2(-12, -18), 325.0, Color("#8ed6c9"))
-	draw_arc(pond_center + Vector2(-12, -18), 275.0, 0.15, 2.65, 42, Color("#b8e8d6"), 8.0, true)
-	draw_arc(pond_center + Vector2(30, 22), 205.0, 3.25, 5.65, 36, Color("#65b8b0"), 6.0, true)
-	draw_circle(pond_center + Vector2(-130, -115), 18.0, Color("#c8eee0"))
-	draw_circle(pond_center + Vector2(145, 96), 11.0, Color("#c8eee0"))
+func _tree(p: Vector2, k: float, c: Color) -> void:
+	draw_rect(Rect2(p+Vector2(-5*k,8*k),Vector2(10*k,32*k)),Color("#986c51"))
+	draw_circle(p+Vector2(0,-8*k),24*k,c)
+	draw_circle(p+Vector2(-16*k,2*k),16*k,c.lightened(0.06))
+	draw_circle(p+Vector2(16*k,2*k),16*k,c.darkened(0.04))
+	draw_circle(p+Vector2(4*k,-23*k),12*k,c.lightened(0.1))
+	draw_circle(p+Vector2(7*k,-12*k),3*k,Color("#d6e49d"))
 
 
-func _draw_meadow_paths() -> void:
-	draw_colored_polygon(PackedVector2Array([
-		Vector2(-2100, 420), Vector2(-1500, 350), Vector2(-900, 470),
-		Vector2(-500, 380), Vector2(-120, 520), Vector2(310, 470),
-		Vector2(680, 620), Vector2(1130, 550), Vector2(1600, 700),
-		Vector2(2100, 630), Vector2(2100, 1300), Vector2(-2100, 1300)
-	]), Color("#c1d99a"))
+func _flower(p: Vector2) -> void:
+	draw_line(p,p+Vector2(0,-15),Color("#729a69"),2.5,true)
+	draw_circle(p+Vector2(0,-18),5,Color("#efb2a1"))
+	draw_circle(p+Vector2(-5,-18),4,Color("#efb2a1"))
+	draw_circle(p+Vector2(5,-18),4,Color("#efb2a1"))
+	draw_circle(p+Vector2(0,-18),2,Color("#f5d77c"))
 
 
-func _draw_tree_groups() -> void:
-	for x in range(-1900, 1901, 245):
-		for y in [-820, -590, 850, 1080]:
-			if x > -250 and x < 1050 and y > 0:
-				continue
-			var index := int(abs(float(x + y) / 17.0)) % TREE_COLORS.size()
-			var size_factor := 0.82 + float((abs(x * 3 + y) % 5)) * 0.07
-			_draw_tree(Vector2(x, y), size_factor, TREE_COLORS[index])
-
-	_draw_tree(Vector2(-1140, 190), 1.35, Color("#5f9867"))
-	_draw_tree(Vector2(1330, 210), 1.28, Color("#83b86d"))
-	_draw_tree(Vector2(-250, -720), 1.25, Color("#76aa70"))
-	_draw_tree(Vector2(1030, -720), 1.18, Color("#a1c879"))
+func _load_progress() -> void:
+	var cfg := ConfigFile.new()
+	if cfg.load("user://vivaria_progress.cfg") != OK:
+		return
+	var saved: Variant = cfg.get_value("classic","completed",[])
+	if saved is Array:
+		for value in saved:
+			var n := int(value)
+			if n >= 1 and n <= 5 and not _completed.has(n):
+				_completed.append(n)
 
 
-func _draw_tree(position: Vector2, scale_factor: float, canopy_color: Color) -> void:
-	var trunk_color := Color("#98634c")
-	var s := scale_factor
-
-	draw_rect(
-		Rect2(position + Vector2(-12.0 * s, -4.0 * s), Vector2(24.0 * s, 76.0 * s)),
-		trunk_color
-	)
-	draw_line(
-		position + Vector2(0.0, 26.0 * s),
-		position + Vector2(-30.0 * s, 2.0 * s),
-		trunk_color,
-		8.0 * s,
-		true
-	)
-	draw_line(
-		position + Vector2(0.0, 14.0 * s),
-		position + Vector2(28.0 * s, -15.0 * s),
-		trunk_color,
-		7.0 * s,
-		true
-	)
-
-	draw_circle(position + Vector2(0.0, -52.0 * s), 57.0 * s, canopy_color)
-	draw_circle(position + Vector2(-42.0 * s, -26.0 * s), 39.0 * s, canopy_color.lightened(0.04))
-	draw_circle(position + Vector2(40.0 * s, -25.0 * s), 40.0 * s, canopy_color.darkened(0.04))
-	draw_circle(position + Vector2(-12.0 * s, -88.0 * s), 34.0 * s, canopy_color.lightened(0.08))
-	draw_circle(position + Vector2(20.0 * s, -48.0 * s), 25.0 * s, canopy_color.darkened(0.07))
-	draw_circle(position + Vector2(-28.0 * s, -63.0 * s), 6.0 * s, Color("#c4d989"))
-	draw_circle(position + Vector2(30.0 * s, -35.0 * s), 5.0 * s, Color("#d2df91"))
+func _save_progress() -> void:
+	var cfg := ConfigFile.new()
+	cfg.set_value("classic","completed",_completed)
+	cfg.save("user://vivaria_progress.cfg")
 
 
-func _draw_flowers() -> void:
-	var flower_positions := [
-		Vector2(-1420, 430), Vector2(-1280, 520), Vector2(-1030, 690),
-		Vector2(-760, 520), Vector2(-420, 660), Vector2(-170, 850),
-		Vector2(820, 760), Vector2(1120, 830), Vector2(1510, 570),
-		Vector2(1730, 860), Vector2(-1660, 980)
-	]
-
-	for i in range(flower_positions.size()):
-		var p: Vector2 = flower_positions[i]
-		var petal_color := Color("#f2a1a0") if i % 3 == 0 else Color("#f3d477")
-		draw_line(p, p + Vector2(0, -22), Color("#659a62"), 4.0, true)
-		draw_circle(p + Vector2(0, -25), 8.0, petal_color)
-		draw_circle(p + Vector2(-7, -25), 6.0, petal_color.lightened(0.08))
-		draw_circle(p + Vector2(7, -25), 6.0, petal_color.lightened(0.08))
-		draw_circle(p + Vector2(0, -25), 3.0, Color("#f8e5a2"))
+func _page() -> Control:
+	for child in _layer.get_children():
+		child.queue_free()
+	_root = Control.new()
+	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_root.mouse_filter = Control.MOUSE_FILTER_PASS
+	_layer.add_child(_root)
+	_status = null
+	_board = null
+	return _root
 
 
-func _draw_foreground_bushes() -> void:
-	for x in range(-2050, 2051, 190):
-		if x > -80 and x < 900:
-			continue
-		var y := 1160.0 + float(abs(x) % 4) * 20.0
-		draw_circle(Vector2(x, y), 92.0, Color("#7eaa70"))
-		draw_circle(Vector2(x + 48, y - 28), 65.0, Color("#92bc77"))
-		draw_circle(Vector2(x - 48, y - 18), 58.0, Color("#6d9b69"))
+func _panel(parent: Control, pos: Vector2, size: Vector2, color: Color = PANEL, radius: int = 24) -> PanelContainer:
+	var p := PanelContainer.new()
+	p.position = pos
+	p.size = size
+	p.custom_minimum_size = size
+	var style := StyleBoxFlat.new()
+	style.bg_color = color
+	style.border_color = Color("#ffffff")
+	style.set_border_width_all(2)
+	style.set_corner_radius_all(radius)
+	style.shadow_color = Color(0.18,0.25,0.16,0.12)
+	style.shadow_size = 10
+	style.shadow_offset = Vector2(0,4)
+	p.add_theme_stylebox_override("panel",style)
+	parent.add_child(p)
+	return p
 
 
-func _create_organic_shape(center: Vector2, radius: float, seed_value: int, points_count: int = 22) -> PackedVector2Array:
-	var rng := RandomNumberGenerator.new()
-	rng.seed = seed_value
-	var points := PackedVector2Array()
-	for i in range(points_count):
-		var angle := TAU * float(i) / float(points_count)
-		var distance := radius * rng.randf_range(0.84, 1.14)
-		points.append(center + Vector2(cos(angle), sin(angle)) * distance)
-	return points
+func _margin(parent: Control, l: int = 22, t: int = 20, r: int = 22, b: int = 20) -> MarginContainer:
+	var m := MarginContainer.new()
+	m.add_theme_constant_override("margin_left",l)
+	m.add_theme_constant_override("margin_top",t)
+	m.add_theme_constant_override("margin_right",r)
+	m.add_theme_constant_override("margin_bottom",b)
+	m.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	parent.add_child(m)
+	return m
 
 
-func _draw_terrain_patches() -> void:
-	for patch in _terrain_patches:
-		var center: Vector2 = patch["position"]
-		var radius: float = float(patch["radius"])
-		var seed_value: int = int(patch["seed"])
-		draw_colored_polygon(_create_organic_shape(center, radius, seed_value), Color("#b99468"))
-		draw_colored_polygon(_create_organic_shape(center + Vector2(-5.0, -7.0), radius * 0.72, seed_value + 31), Color("#d1b184"))
-		draw_arc(center, radius * 0.78, 0.25, 2.55, 28, Color("#e2c79e"), 4.0, true)
+func _label(parent: Control, text_value: String, size: int, color: Color = INK, align: HorizontalAlignment = HORIZONTAL_ALIGNMENT_LEFT) -> Label:
+	var l := Label.new()
+	l.text = text_value
+	l.add_theme_font_size_override("font_size",size)
+	l.add_theme_color_override("font_color",color)
+	l.horizontal_alignment = align
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	parent.add_child(l)
+	return l
 
 
-func _draw_water_patches() -> void:
-	for patch in _water_patches:
-		var center: Vector2 = patch["position"]
-		var radius: float = float(patch["radius"])
-		var seed_value: int = int(patch["seed"])
-		draw_colored_polygon(_create_organic_shape(center, radius, seed_value), Color("#55aeb0"))
-		draw_colored_polygon(_create_organic_shape(center + Vector2(-7.0, -9.0), radius * 0.77, seed_value + 47), Color("#83d2c9"))
-		draw_arc(center + Vector2(-8.0, -10.0), radius * 0.55, 3.5, 5.4, 24, Color("#c0eee0"), 5.0, true)
-		draw_line(center + Vector2(-radius * 0.30, -radius * 0.10), center + Vector2(radius * 0.18, -radius * 0.18), Color("#d8f4df"), 4.0, true)
+func _button(parent: Control, text_value: String, size: Vector2, callback: Callable, color: Color = GREEN, font_size: int = 14) -> Button:
+	var b := Button.new()
+	b.text = text_value
+	b.custom_minimum_size = size
+	b.size = size
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size",font_size)
+	b.add_theme_color_override("font_color",Color("#ffffff"))
+	b.add_theme_color_override("font_hover_color",Color("#ffffff"))
+	b.add_theme_color_override("font_pressed_color",Color("#ffffff"))
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = color
+	normal.border_color = color.lightened(0.16)
+	normal.set_border_width_all(1)
+	normal.set_corner_radius_all(17)
+	b.add_theme_stylebox_override("normal",normal)
+	var hover := StyleBoxFlat.new()
+	hover.bg_color = color.lightened(0.08)
+	hover.set_border_width_all(1)
+	hover.set_border_color(color.lightened(0.2))
+	hover.set_corner_radius_all(17)
+	b.add_theme_stylebox_override("hover",hover)
+	var pressed := StyleBoxFlat.new()
+	pressed.bg_color = color.darkened(0.08)
+	pressed.set_corner_radius_all(17)
+	b.add_theme_stylebox_override("pressed",pressed)
+	b.pressed.connect(callback)
+	parent.add_child(b)
+	return b
 
 
-func _draw_placed_plants() -> void:
-	for plant in _plants:
-		var position: Vector2 = plant["position"]
-		var scale_factor: float = float(plant["scale"])
-		match int(plant["kind"]):
-			0:
-				_draw_placed_flower(position, scale_factor)
-			1:
-				_draw_placed_bush(position, scale_factor)
-			2:
-				_draw_placed_sapling(position, scale_factor)
+func _soft_button(parent: Control, text_value: String, size: Vector2, callback: Callable) -> Button:
+	var b := Button.new()
+	b.text = text_value
+	b.custom_minimum_size = size
+	b.size = size
+	b.focus_mode = Control.FOCUS_NONE
+	b.add_theme_font_size_override("font_size",13)
+	b.add_theme_color_override("font_color",INK)
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = Color("#edf0e2")
+	normal.border_color = Color("#e1e7d6")
+	normal.set_border_width_all(1)
+	normal.set_corner_radius_all(16)
+	b.add_theme_stylebox_override("normal",normal)
+	var hover := StyleBoxFlat.new()
+	hover.bg_color = Color("#e2ebd6")
+	hover.set_corner_radius_all(16)
+	b.add_theme_stylebox_override("hover",hover)
+	b.add_theme_stylebox_override("pressed",hover)
+	b.pressed.connect(callback)
+	parent.add_child(b)
+	return b
 
 
-func _draw_placed_flower(position: Vector2, scale_factor: float) -> void:
-	var stem_color := Color("#57895c")
-	var flower_color := Color("#f2a0a0")
-	var s := scale_factor
-	draw_line(position, position + Vector2(0.0, -34.0 * s), stem_color, 4.0 * s, true)
-	draw_line(position + Vector2(0.0, -17.0 * s), position + Vector2(-10.0 * s, -24.0 * s), stem_color, 3.0 * s, true)
-	draw_circle(position + Vector2(0.0, -38.0 * s), 8.0 * s, flower_color)
-	draw_circle(position + Vector2(-8.0 * s, -38.0 * s), 6.0 * s, flower_color.lightened(0.08))
-	draw_circle(position + Vector2(8.0 * s, -38.0 * s), 6.0 * s, flower_color.lightened(0.08))
-	draw_circle(position + Vector2(0.0, -38.0 * s), 3.5 * s, Color("#f5d77f"))
+func _animate(node: Control) -> void:
+	node.modulate.a = 0.0
+	var tween := create_tween()
+	tween.tween_property(node,"modulate:a",1.0,0.22).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
-func _draw_placed_bush(position: Vector2, scale_factor: float) -> void:
-	var s := scale_factor
-	draw_circle(position, 29.0 * s, Color("#5f9663"))
-	draw_circle(position + Vector2(-20.0 * s, -10.0 * s), 22.0 * s, Color("#7faf70"))
-	draw_circle(position + Vector2(19.0 * s, -13.0 * s), 24.0 * s, Color("#8dbb75"))
-	draw_circle(position + Vector2(-3.0 * s, -28.0 * s), 19.0 * s, Color("#9ac57d"))
+func _show_home() -> void:
+	_screen = "home"
+	var root := _page()
+	var brand := _panel(root,Vector2(48,24),Vector2(390,76),PANEL,22)
+	var bm := _margin(brand,18,7,18,7)
+	var bs := VBoxContainer.new()
+	bs.add_theme_constant_override("separation",0)
+	bm.add_child(bs)
+	_label(bs,"ViVARiA",27,INK)
+	_label(bs,"UN PEQUEÑO MUNDO DE RETOS",10,MUTED)
+
+	var chip := _panel(root,Vector2(900,30),Vector2(330,58),Color("#f1f4e7"),20)
+	_label(_margin(chip,12,4,12,4),"MODO CLÁSICO  ·  5 DESAFÍOS",13,DARK_GREEN,HORIZONTAL_ALIGNMENT_CENTER)
+
+	var hero := _panel(root,Vector2(48,126),Vector2(1184,548),PANEL,30)
+	var columns := HBoxContainer.new()
+	columns.add_theme_constant_override("separation",34)
+	_margin(hero,38,34,38,34).add_child(columns)
+
+	var left := VBoxContainer.new()
+	left.custom_minimum_size = Vector2(580,0)
+	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left.add_theme_constant_override("separation",12)
+	columns.add_child(left)
+	_label(left,"BIENVENIDO A TU ESPACIO",11,MUTED)
+	var headline := _label(left,"Pequeños retos.\nGrandes momentos.",37,INK)
+	headline.custom_minimum_size = Vector2(0,112)
+	headline.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_label(left,"Resuelve, ordena y descubre a tu ritmo.\nSin prisa. Solo un reto bonito a la vez.",17,MUTED)
+	var spacer := Control.new()
+	spacer.custom_minimum_size = Vector2(0,12)
+	left.add_child(spacer)
+	_button(left,"CONTINUAR  →",Vector2(250,64),_start_next,DARK_GREEN,16).size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_soft_button(left,"VER TODOS LOS NIVELES",Vector2(250,54),_show_levels).size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	var note := _label(left,"5 RETOS CORTOS  ·  PROGRESO GUARDADO EN TU DISPOSITIVO",10,MUTED)
+	note.custom_minimum_size = Vector2(0,38)
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	var preview := _panel(columns,Vector2.ZERO,Vector2(420,430),Color("#edf2e3"),26)
+	preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var ps := VBoxContainer.new()
+	ps.add_theme_constant_override("separation",10)
+	_margin(preview,24,22,24,20).add_child(ps)
+	_label(ps,"TU CAMINO",12,MUTED)
+	_label(ps,"Modo clásico",24,INK)
+	_label(ps,"%d de 5 desafíos completados" % _completed.size(),13,MUTED)
+	var progress_bg := _panel(ps,Vector2.ZERO,Vector2(0,14),Color("#dce5d1"),9)
+	progress_bg.custom_minimum_size = Vector2(0,14)
+	var progress_fill := ColorRect.new()
+	progress_fill.color = Color("#8eae7d")
+	progress_fill.size = Vector2(348.0 * float(_completed.size()) / 5.0,14)
+	progress_fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	progress_bg.add_child(progress_fill)
+	var divider := HSeparator.new()
+	divider.add_theme_color_override("color",Color("#dce5d5"))
+	ps.add_child(divider)
+	var next := _next_level()
+	var next_card := _panel(ps,Vector2.ZERO,Vector2(0,142),PANEL,20)
+	next_card.custom_minimum_size = Vector2(0,142)
+	var ns := VBoxContainer.new()
+	ns.add_theme_constant_override("separation",5)
+	_margin(next_card,17,14,17,12).add_child(ns)
+	_label(ns,"SIGUIENTE DESAFÍO",10,MUTED)
+	var next_title := _label(ns,"%02d  ·  %s" % [next,TITLES[next-1]],17,INK)
+	next_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var next_desc := _label(ns,DESCRIPTIONS[next-1],12,MUTED)
+	next_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_label(ps,"PEQUEÑOS PASOS, GRANDES SONRISAS.",10,DARK_GREEN)
+	_animate(hero)
 
 
-func _draw_placed_sapling(position: Vector2, scale_factor: float) -> void:
-	var s := scale_factor
-	draw_line(position + Vector2(0.0, 12.0 * s), position + Vector2(0.0, -35.0 * s), Color("#98634c"), 6.0 * s, true)
-	draw_circle(position + Vector2(0.0, -43.0 * s), 25.0 * s, Color("#77a96b"))
-	draw_circle(position + Vector2(-18.0 * s, -32.0 * s), 15.0 * s, Color("#91bd78"))
-	draw_circle(position + Vector2(17.0 * s, -31.0 * s), 15.0 * s, Color("#a2c77d"))
+func _show_levels() -> void:
+	_screen = "levels"
+	var root := _page()
+	var back := _soft_button(root,"← VOLVER",Vector2(126,54),_show_home)
+	back.position = Vector2(46,30)
+	var h := _label(root,"Modo clásico",30,INK)
+	h.position = Vector2(198,25)
+	h.size = Vector2(440,42)
+	var sub := _label(root,"Cinco pequeños desafíos para empezar.",13,MUTED)
+	sub.position = Vector2(200,68)
+	sub.size = Vector2(450,26)
+	var counter := _label(root,"%d / 5 COMPLETADOS" % _completed.size(),12,DARK_GREEN,HORIZONTAL_ALIGNMENT_RIGHT)
+	counter.position = Vector2(900,35)
+	counter.size = Vector2(320,32)
+
+	var w := 216.0
+	var gap := 14.0
+	var x0 := (1280.0-(w*5.0+gap*4.0))*0.5
+	for i in range(5):
+		var n := i+1
+		var unlocked := _unlocked(n)
+		var done := _completed.has(n)
+		var card := _panel(root,Vector2(x0+float(i)*(w+gap),145),Vector2(w,470),PANEL if unlocked else Color("#f0f0e6"),25)
+		var stack := VBoxContainer.new()
+		stack.add_theme_constant_override("separation",9)
+		_margin(card,17,19,17,17).add_child(stack)
+
+		var num := _panel(stack,Vector2.ZERO,Vector2(64,54),ACCENTS[i].lightened(0.24) if unlocked else Color("#e4e5dc"),16)
+		num.custom_minimum_size = Vector2(64,54)
+		_label(_margin(num,4,2,4,2),"%02d" % n,21,INK,HORIZONTAL_ALIGNMENT_CENTER)
+		_label(stack,["OBSERVA","RECUERDA","CONECTA","CLASIFICA","COMPLETA"][i],10,MUTED)
+		var title := _label(stack,TITLES[i],18,INK if unlocked else MUTED)
+		title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		title.custom_minimum_size = Vector2(0,65)
+		var desc := _label(stack,DESCRIPTIONS[i],12,MUTED)
+		desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		desc.custom_minimum_size = Vector2(0,104)
+		var fill := Control.new()
+		fill.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		stack.add_child(fill)
+		_label(stack,"✓ COMPLETADO" if done else ("DISPONIBLE" if unlocked else "BLOQUEADO"),10,DARK_GREEN if unlocked else MUTED)
+		var play := _button(stack,"JUGAR" if unlocked else "CERRADO",Vector2(0,48),_open_level.bind(n),DARK_GREEN if unlocked else Color("#b8bdae"),12)
+		play.disabled = not unlocked
+		play.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_animate(root)
+
+
+func _show_game() -> void:
+	_screen = "game"
+	var root := _page()
+	var back := _soft_button(root,"← NIVELES",Vector2(136,54),_show_levels)
+	back.position = Vector2(46,25)
+	var heading := _label(root,"NIVEL %02d  ·  %s" % [_level,TITLES[_level-1].to_upper()],18,INK)
+	heading.position = Vector2(208,30)
+	heading.size = Vector2(670,38)
+	var count := _label(root,"%d / 5" % _level,14,MUTED,HORIZONTAL_ALIGNMENT_RIGHT)
+	count.position = Vector2(1060,31)
+	count.size = Vector2(160,34)
+
+	var info := _panel(root,Vector2(46,112),Vector2(300,560),PANEL,25)
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation",9)
+	_margin(info,22,20,22,20).add_child(stack)
+	_label(stack,"DESAFÍO %02d" % _level,10,MUTED)
+	var title := _label(stack,TITLES[_level-1],23,INK)
+	title.custom_minimum_size = Vector2(0,62)
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	var desc := _label(stack,DESCRIPTIONS[_level-1],14,MUTED)
+	desc.custom_minimum_size = Vector2(0,98)
+	desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	var how := _panel(stack,Vector2.ZERO,Vector2(0,92),Color("#eff3e7"),17)
+	how.custom_minimum_size = Vector2(0,92)
+	var how_stack := VBoxContainer.new()
+	how_stack.add_theme_constant_override("separation",3)
+	_margin(how,13,9,13,9).add_child(how_stack)
+	_label(how_stack,"CÓMO JUGAR",9,DARK_GREEN)
+	var how_text := ["Toca una semilla y luego otra para cambiar sus posiciones.","Toca dos tarjetas. Si son iguales, se quedarán descubiertas.","Toca las piezas curvas para girarlas y unir el recorrido.","Elige una hoja y después la maceta que tenga su color.","Toca los espacios vacíos para dibujar el reflejo."][_level-1]
+	var how_label := _label(how_stack,how_text,12,MUTED)
+	how_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+	var grow := Control.new()
+	grow.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_child(grow)
+	_status = _label(stack,"Tómate tu tiempo. No hay prisa.",12,MUTED)
+	_status.custom_minimum_size = Vector2(0,52)
+	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_soft_button(stack,"VER PISTA",Vector2(0,48),_show_hint).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_button(stack,"COMPROBAR",Vector2(0,56),_check,DARK_GREEN,14).size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var board_panel := _panel(root,Vector2(370,112),Vector2(864,560),PANEL,25)
+	var board_stack := VBoxContainer.new()
+	board_stack.add_theme_constant_override("separation",6)
+	_margin(board_panel,25,22,25,22).add_child(board_stack)
+	_label(board_stack,"TU ESPACIO DE JUEGO",10,MUTED)
+	var line := HSeparator.new()
+	line.add_theme_color_override("color",Color("#e8eadf"))
+	board_stack.add_child(line)
+	_board = Control.new()
+	_board.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_board.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	board_stack.add_child(_board)
+	_render_board()
+	_animate(board_panel)
+
+
+func _render_board() -> void:
+	if not is_instance_valid(_board):
+		return
+	for child in _board.get_children():
+		child.queue_free()
+	match _level:
+		1: _build_seeds()
+		2: _build_memory()
+		3: _build_pipes()
+		4: _build_leaves()
+		5: _build_mirror()
+
+
+func _tile_style(b: Button, color: Color, selected: bool) -> void:
+	var normal := StyleBoxFlat.new()
+	normal.bg_color = color.darkened(0.04) if selected else color
+	normal.border_color = Color("#8eae7d") if selected else Color("#ffffff")
+	normal.set_border_width_all(2 if selected else 1)
+	normal.set_corner_radius_all(20)
+	b.add_theme_stylebox_override("normal",normal)
+	var hover := StyleBoxFlat.new()
+	hover.bg_color = color.lightened(0.06)
+	hover.border_color = Color("#a9c397")
+	hover.set_border_width_all(2)
+	hover.set_corner_radius_all(20)
+	b.add_theme_stylebox_override("hover",hover)
+	var pressed := StyleBoxFlat.new()
+	pressed.bg_color = color.darkened(0.06)
+	pressed.set_corner_radius_all(20)
+	b.add_theme_stylebox_override("pressed",pressed)
+
+
+func _build_seeds() -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_board.add_child(center)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation",16)
+	center.add_child(row)
+	var glyphs := ["·","•","●","⬤"]
+	for i in range(4):
+		var value: int = _seeds[i]
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(158,220)
+		b.focus_mode = Control.FOCUS_NONE
+		_tile_style(b,Color("#edf2e4") if _selected_seed != i else Color("#dce9d0"),_selected_seed == i)
+		b.pressed.connect(_on_seed.bind(i))
+		row.add_child(b)
+		var contents := VBoxContainer.new()
+		contents.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		contents.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		contents.add_theme_constant_override("separation",5)
+		b.add_child(contents)
+		var top := Control.new()
+		top.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		contents.add_child(top)
+		var glyph := _label(contents,glyphs[value-1],26+value*9,DARK_GREEN,HORIZONTAL_ALIGNMENT_CENTER)
+		glyph.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var caption := _label(contents,"SEMILLA",11,MUTED,HORIZONTAL_ALIGNMENT_CENTER)
+		caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var bottom := Control.new()
+		bottom.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		contents.add_child(bottom)
+
+
+func _on_seed(i: int) -> void:
+	if _selected_seed == -1:
+		_selected_seed = i
+		_feedback("Ahora elige otra semilla para intercambiarla.")
+	else:
+		if _selected_seed != i:
+			var temp: int = _seeds[i]
+			_seeds[i] = _seeds[_selected_seed]
+			_seeds[_selected_seed] = temp
+			_feedback("¡Cambio hecho! Sigue ordenando las semillas.")
+		_selected_seed = -1
+	_render_board()
+
+
+func _build_memory() -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_board.add_child(center)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation",17)
+	grid.add_theme_constant_override("v_separation",14)
+	center.add_child(grid)
+	for i in range(6):
+		var visible := _memory_pairs.has(i) or _memory_open.has(i)
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(164,142)
+		b.focus_mode = Control.FOCUS_NONE
+		b.text = _memory_faces[i] if visible else "?"
+		b.add_theme_font_size_override("font_size",37 if visible else 30)
+		b.add_theme_color_override("font_color",DARK_GREEN if visible else Color("#8aa17e"))
+		_tile_style(b,Color("#e1ecd8") if _memory_pairs.has(i) else (Color("#f4eee1") if visible else Color("#edf2e4")),_memory_open.has(i))
+		b.disabled = _memory_pairs.has(i)
+		b.pressed.connect(_on_memory.bind(i))
+		grid.add_child(b)
+
+
+func _on_memory(i: int) -> void:
+	if _memory_pairs.has(i) or _memory_open.has(i):
+		return
+	if _memory_open.size() >= 2:
+		_memory_open.clear()
+	_memory_open.append(i)
+	if _memory_open.size() == 2:
+		var a: int = _memory_open[0]
+		var b: int = _memory_open[1]
+		if _memory_faces[a] == _memory_faces[b]:
+			_memory_pairs.append(a)
+			_memory_pairs.append(b)
+			_memory_open.clear()
+			_feedback("¡Encontraste una pareja!")
+		else:
+			_feedback("No son iguales. Prueba con otras dos tarjetas.")
+	_render_board()
+
+
+func _build_pipes() -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_board.add_child(center)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation",12)
+	grid.add_theme_constant_override("v_separation",12)
+	center.add_child(grid)
+	var path := [3,4,7,8,5]
+	for cell in range(9):
+		var idx := path.find(cell)
+		if idx == -1:
+			var blank := PanelContainer.new()
+			blank.custom_minimum_size = Vector2(132,104)
+			var st := StyleBoxFlat.new()
+			st.bg_color = Color("#f4f4e9")
+			st.set_corner_radius_all(20)
+			blank.add_theme_stylebox_override("panel",st)
+			grid.add_child(blank)
+		else:
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(132,104)
+			b.focus_mode = Control.FOCUS_NONE
+			if idx == 0:
+				b.text = "◉  →\nFUENTE"
+				b.add_theme_font_size_override("font_size",18)
+				_tile_style(b,Color("#dcece2"),false)
+				b.disabled = true
+			else:
+				var glyphs := ["┐","┘","└","┌"]
+				b.text = "%s\nTUBERÍA" % glyphs[_pipes[idx]]
+				b.add_theme_font_size_override("font_size",25)
+				_tile_style(b,Color("#e1f0eb"),true)
+				b.pressed.connect(_on_pipe.bind(idx))
+			grid.add_child(b)
+
+
+func _on_pipe(i: int) -> void:
+	_pipes[i] = (_pipes[i]+1)%4
+	_feedback("La tubería giró. Busca un camino continuo.")
+	_render_board()
+
+
+func _build_leaves() -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_board.add_child(center)
+	var content := VBoxContainer.new()
+	content.custom_minimum_size = Vector2(660,330)
+	content.add_theme_constant_override("separation",18)
+	center.add_child(content)
+	_label(content,"ELIGE UNA HOJA",11,MUTED,HORIZONTAL_ALIGNMENT_CENTER)
+	var leaves := HBoxContainer.new()
+	leaves.alignment = BoxContainer.ALIGNMENT_CENTER
+	leaves.add_theme_constant_override("separation",18)
+	content.add_child(leaves)
+	var names := ["VERDE","CORAL","DORADA"]
+	var colors := [Color("#a8c68e"),Color("#e8aaa0"),Color("#e8cc7e")]
+	for i in range(3):
+		var color_id: int = _leaf_items[i]
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(170,96)
+		b.text = "❧\n%s" % names[color_id]
+		b.add_theme_font_size_override("font_size",19)
+		b.add_theme_color_override("font_color",INK)
+		var assigned := _leaf_pots.find(i) != -1
+		_tile_style(b,Color("#e1e6dc") if assigned else colors[color_id].lightened(0.18),_selected_leaf == i)
+		b.disabled = assigned
+		b.pressed.connect(_on_leaf.bind(i))
+		leaves.add_child(b)
+	_label(content,"↓  DEVUÉLVELA A SU LUGAR  ↓",10,MUTED,HORIZONTAL_ALIGNMENT_CENTER)
+	var pots := HBoxContainer.new()
+	pots.alignment = BoxContainer.ALIGNMENT_CENTER
+	pots.add_theme_constant_override("separation",18)
+	content.add_child(pots)
+	for i in range(3):
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(170,112)
+		b.text = "MACETA\n%s" % names[i] if _leaf_pots[i] == -1 else "✓\n%s" % names[i]
+		b.add_theme_font_size_override("font_size",15)
+		b.add_theme_color_override("font_color",INK)
+		_tile_style(b,colors[i].lightened(0.24),_leaf_pots[i] != -1)
+		b.pressed.connect(_on_pot.bind(i))
+		pots.add_child(b)
+
+
+func _on_leaf(i: int) -> void:
+	for pot in range(3):
+		if _leaf_pots[pot] == i:
+			_leaf_pots[pot] = -1
+			break
+	_selected_leaf = i
+	_feedback("Ahora elige la maceta del mismo color.")
+	_render_board()
+
+
+func _on_pot(i: int) -> void:
+	if _leaf_pots[i] != -1:
+		_feedback("Esa maceta ya tiene su hoja.")
+		return
+	if _selected_leaf == -1:
+		_feedback("Primero selecciona una hoja.")
+		return
+	if _leaf_items[_selected_leaf] != i:
+		_feedback("Casi. Busca la maceta que tenga ese mismo color.")
+		return
+	_leaf_pots[i] = _selected_leaf
+	_selected_leaf = -1
+	_feedback("¡Una hoja encontró su lugar!")
+	_render_board()
+
+
+func _build_mirror() -> void:
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_board.add_child(center)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation",10)
+	grid.add_theme_constant_override("v_separation",10)
+	center.add_child(grid)
+	for i in range(16):
+		var col := i%4
+		var fixed := _mirror_fixed.has(i)
+		var filled := _mirror_filled.has(i)
+		var b := Button.new()
+		b.custom_minimum_size = Vector2(92,86)
+		b.focus_mode = Control.FOCUS_NONE
+		b.text = "✿" if fixed or filled else "·"
+		b.add_theme_font_size_override("font_size",27 if fixed or filled else 24)
+		b.add_theme_color_override("font_color",DARK_GREEN if fixed or filled else Color("#b4c2a7"))
+		_tile_style(b,Color("#e2edd8") if fixed else (Color("#dce9d0") if filled else Color("#f0f2e7")),filled)
+		b.disabled = col < 2
+		b.pressed.connect(_on_mirror.bind(i))
+		grid.add_child(b)
+
+
+func _on_mirror(i: int) -> void:
+	if _mirror_filled.has(i):
+		_mirror_filled.erase(i)
+	else:
+		_mirror_filled.append(i)
+	_feedback("¡Muy bien! Compara ambos lados del jardín.")
+	_render_board()
+
+
+func _feedback(message: String) -> void:
+	if is_instance_valid(_status):
+		_status.text = message
+		_status.add_theme_color_override("font_color",DARK_GREEN)
+
+
+func _show_hint() -> void:
+	_feedback(HINTS[_level-1])
+
+
+func _check() -> void:
+	var solved := false
+	match _level:
+		1: solved = _seeds == [1,2,3,4]
+		2: solved = _memory_pairs.size() == 6
+		3: solved = _pipes == [0,0,0,0,0]
+		4: solved = _leaf_pots == [1,2,0]
+		5:
+			solved = _mirror_filled.size() == _mirror_targets.size()
+			for target in _mirror_targets:
+				if not _mirror_filled.has(target):
+					solved = false
+					break
+	if solved:
+		if not _completed.has(_level):
+			_completed.append(_level)
+			_completed.sort()
+			_save_progress()
+		_show_complete()
+	else:
+		_feedback("Todavía falta un pequeño ajuste. ¡Tú puedes!")
+
+
+func _show_complete() -> void:
+	_screen = "complete"
+	var root := _page()
+	var back := _soft_button(root,"← NIVELES",Vector2(126,54),_show_levels)
+	back.position = Vector2(46,30)
+	var panel := _panel(root,Vector2(230,116),Vector2(820,520),PANEL,30)
+	var stack := VBoxContainer.new()
+	stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	stack.add_theme_constant_override("separation",13)
+	_margin(panel,52,40,52,40).add_child(stack)
+	_label(stack,"✿",60,Color("#8cac77"),HORIZONTAL_ALIGNMENT_CENTER)
+	_label(stack,"¡RETO COMPLETADO!",29,INK,HORIZONTAL_ALIGNMENT_CENTER)
+	_label(stack,TITLES[_level-1],18,MUTED,HORIZONTAL_ALIGNMENT_CENTER)
+	_label(stack,"Un pequeño paso para tu colección de desafíos.",14,MUTED,HORIZONTAL_ALIGNMENT_CENTER)
+	_label(stack,"%d DE 5 NIVELES COMPLETADOS" % _completed.size(),11,DARK_GREEN,HORIZONTAL_ALIGNMENT_CENTER)
+	var text := "SIGUIENTE DESAFÍO  →" if _level < 5 else "VOLVER AL INICIO"
+	var next := _button(stack,text,Vector2(310,60),_continue,DARK_GREEN,14)
+	next.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var list := _soft_button(stack,"VER NIVELES",Vector2(240,50),_show_levels)
+	list.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	_animate(panel)
+
+
+func _continue() -> void:
+	if _level < 5:
+		_open_level(_level+1)
+	else:
+		_show_home()
+
+
+func _reset() -> void:
+	match _level:
+		1:
+			_seeds = [3,1,4,2]
+			_selected_seed = -1
+		2:
+			_memory_open.clear()
+			_memory_pairs.clear()
+		3: _pipes = [0,1,3,1,2]
+		4:
+			_leaf_pots = [-1,-1,-1]
+			_selected_leaf = -1
+		5: _mirror_filled.clear()
+	_show_game()
+
+
+func _open_level(n: int) -> void:
+	if not _unlocked(n):
+		return
+	_level = clampi(n,1,5)
+	_reset()
+
+
+func _start_next() -> void:
+	_open_level(_next_level())
+
+
+func _next_level() -> int:
+	for n in range(1,6):
+		if not _completed.has(n):
+			return n
+	return 5
+
+
+func _unlocked(n: int) -> bool:
+	return n <= 1 or _completed.has(n-1)
