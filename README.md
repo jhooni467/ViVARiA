@@ -1,27 +1,22 @@
 # ViVARiA
 
-**Create your world and experiment.**
+**Small puzzles. A little space to unwind.**
 
-ViVARiA is a native Android-first 2D sandbox made with Godot 4.7.2. It focuses on relaxed world creation with a colorful, illustrated look.
+ViVARiA is a native Android-first casual puzzle game made with Godot 4.7.2. It keeps its colorful, flat 2D illustrated world and soft nature-inspired interface.
 
-## Current playable slice
+## Classic mode — first five levels
 
-The first editor prototype includes:
+1. **Semillas en orden:** swap four seeds until they are ordered from smallest to largest.
+2. **Parejas del bosque:** find three matching pairs in a small memory game.
+3. **Un camino de agua:** rotate curved pipes to connect a water source to a flower.
+4. **El rincón de las hojas:** match three colored leaves to their pots.
+5. **Un jardín en equilibrio:** complete the right half of a garden by mirroring the left half.
 
-- A layered, illustrated meadow world.
-- A Tierra brush for adding organic soil patches.
-- An Agua brush for creating small pools.
-- A Plantas brush that places flowers, bushes, and young trees.
-- A Borrar tool for removing placed edits.
-- Adjustable brush size.
-- Touch-first controls: one finger to paint, two fingers to pan and zoom.
-- Desktop controls: left mouse button to paint, middle/right mouse button to pan, and mouse wheel to zoom.
-
-Edits currently live only in the running session. Saving/loading, terrain sculpting, procedural world generation, creatures, climate systems, and active ecosystem simulation are not implemented yet.
+The first five challenges are short, easy introductions with simple touch controls. Completing a level unlocks the next one. Classic-mode progress is saved locally on the device.
 
 ## Artistic direction
 
-A colorful, flat 2D illustrated world with layered landscapes, organic silhouettes, soft lighting, and distinct biome palettes. The camera stays flat: the world can be moved and zoomed, but it is not a 3D scene.
+A clean, friendly 2D illustrated look: soft greens, layered hills, organic details, rounded panels, gentle shadows, and calm transitions. The game uses a flat 2D camera and landscape orientation.
 
 ## Technology
 
