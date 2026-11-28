@@ -371,7 +371,8 @@ func _erase_at(world_position: Vector2) -> void:
 	for i in range(_terrain_patches.size() - 1, -1, -1):
 		var patch: Dictionary = _terrain_patches[i]
 		var radius: float = float(patch["radius"])
-		if (patch["position"] as Vector2).distance_to(world_position) <= _brush_size + radius * 0.65:
+		var patch_position: Vector2 = patch["position"]
+		if patch_position.distance_to(world_position) <= _brush_size + radius * 0.65:
 			_terrain_patches.remove_at(i)
 
 	for i in range(_water_patches.size() - 1, -1, -1):
@@ -382,7 +383,8 @@ func _erase_at(world_position: Vector2) -> void:
 
 	for i in range(_plants.size() - 1, -1, -1):
 		var plant: Dictionary = _plants[i]
-		if (plant["position"] as Vector2).distance_to(world_position) <= _brush_size + 42.0:
+		var plant_position: Vector2 = plant["position"]
+		if plant_position.distance_to(world_position) <= _brush_size + 42.0:
 			_plants.remove_at(i)
 
 
